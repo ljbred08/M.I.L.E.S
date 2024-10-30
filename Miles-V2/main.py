@@ -729,7 +729,7 @@ def listen():
         f.write(audio.get_wav_data())
 
     # Load the Whisper model
-    model = whisper.load_model("base")  # Adjust the model size as needed
+    model = whisper.load_model("tiny")  # Adjust the model size as needed
 
     # Transcribe the audio file
     result = model.transcribe(audio_file)
