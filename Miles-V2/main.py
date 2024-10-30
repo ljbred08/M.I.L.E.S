@@ -8,11 +8,14 @@ import openai
 import json
 import math
 import os
-from apikey import weather_api_key, DEFAULT_LOCATION, UNIT, spotify_client_id, spotify_client_secret
+from apikey import weather_api_key, DEFAULT_LOCATION, UNIT, spotify_client_id, spotify_client_secret, picovoice_access_key
 from datetime import datetime
 import sympy as smpy
 from urllib3.exceptions import NotOpenSSLWarning
 import generateTool
+import pvorca
+
+openai_base_url = "https://api.groq.com/openai/v1"
 
 was_spotify_playing = False
 original_volume = None
@@ -216,7 +219,7 @@ def search_and_play_song(song_name: str):
 
     return response
     
-current_model = "gpt-3.5-turbo-0125" # default model to start the program with, you can change this.
+current_model = "llama-3.1-70b-versatile" # default model to start the program with, you can change this.
 
 def toggle_spotify_playback(action):
     global was_spotify_playing, user_requested_pause
@@ -262,20 +265,32 @@ def toggle_spotify_playback(action):
 
 def switch_ai_model(model_name):
     global current_model
-    valid_models = ["gpt-4-0125-preview", "gpt-3.5-turbo-0125"]
+    valid_models = ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "llama-3.2-1b-preview", "llama-3.2-3b-preview", "llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview", "llama3-70b-8192", "llama3-8b-8192"]
     warning_message = ""
 
     if model_name in valid_models:
         current_model = model_name
         print(f"[Miles is switching the model to {current_model}...]")
 
-        if current_model == "gpt-3.5-turbo-0125":
-            warning_message = "Tell the user: I'm required to tell you this disclaimer, choosing GPT-3.5 as my model will result in less accurate responses and reduced tool functionality but will be 20 times cheaper."
-        elif current_model == "gpt-4-0125-preview":
-            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using GPT-4 as my model is approximately 20 times more expensive and may take longer to process responses."
+        if current_model == "llama-3.1-70b-versatile":
+            warning_message = "Tell the user: I'm required to tell you this disclaimer, choosing llama-3.1-70b-versatile as my model will result in less accurate responses and reduced tool functionality but will be more cost-effective."
+        elif current_model == "llama-3.1-8b-instant":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama-3.1-8b-instant as my model will provide a balanced performance with good accuracy and speed."
+        elif current_model == "llama-3.2-1b":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama-3.2-1b as my model may result in less accurate responses and limited tool functionality."
+        elif current_model == "llama-3.2-3b":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama-3.2-3b as my model may result in less accurate responses and limited tool functionality."
+        elif current_model == "llama-3.2-11b-vision":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama-3.2-11b-vision as my model will provide enhanced vision capabilities but may require more computational resources."
+        elif current_model == "llama-3.2-90b-vision":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama-3.2-90b-vision as my model will provide advanced vision capabilities but may require significantly more computational resources."
+        elif current_model == "llama3-70b-8192":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama3-70b-8192 as my model will provide high accuracy and extensive context handling but may require more computational resources."
+        elif current_model == "llama3-8b-8192":
+            warning_message = "Tell the user this: I'm required to tell you this disclaimer, using llama3-8b-8192 as my model will provide a balanced performance with good accuracy and speed. It has lower rate limits than llama-3.1-8b-instant."
 
     else:
-        current_model = "gpt-3.5-turbo-0125"
+        current_model = "llama-3.1-70b-versatile"
 
     message = f"Switched to model {current_model}. {warning_message}"
     return json.dumps({"AI Model Update Success": message.strip()})
@@ -609,6 +624,7 @@ def view_webcam(focus, detail_mode='normal'):
         speak_no_text("Alright, I'm now processing the image with normal detail.")
     
     openai.api_key = api_key
+    openai.api_base = openai_base_url
     client = OpenAI(api_key=api_key)
     
     # Setup the API request with the base64 image
@@ -642,6 +658,7 @@ recognizer = sr.Recognizer()
 
 
 openai.api_key = api_key
+openai.api_base = openai_base_url
 client = OpenAI(api_key=api_key)
 
 def speak(text):
@@ -651,17 +668,14 @@ def speak(text):
         return
 
     try:
-        response = client.audio.speech.create(
-            model="tts-1",
-            voice="echo",
-            input=text
+        pcm, alignments = orca.synthesize(text=text)
+        audio = AudioSegment(
+            pcm.tobytes(), 
+            frame_rate=24000,
+            sample_width=2, 
+            channels=1
         )
-
-        byte_stream = io.BytesIO(response.content)
-
-        audio = AudioSegment.from_file(byte_stream, format="mp3")
-        audio.export("output.mp3", format="mp3")
-
+        
         print("[Miles is speaking a response...]")
         play(audio)
 
@@ -669,6 +683,7 @@ def speak(text):
         print(f"An error occurred: {e}")
 
         openai.api_key = api_key
+openai.api_base = openai_base_url
 client = OpenAI(api_key=api_key)
 
 def speak_no_text(text):
@@ -678,14 +693,15 @@ def speak_no_text(text):
 
     def _speak():
         try:
-            response = client.audio.speech.create(
-                model="tts-1",
-                voice="echo",
-                input=text
+            pcm, alignments = orca.synthesize(text=text)
+            audio = AudioSegment(
+                pcm.tobytes(), 
+                frame_rate=24000,
+                sample_width=2, 
+                channels=1
             )
-
-            byte_stream = io.BytesIO(response.content)
-            audio = AudioSegment.from_file(byte_stream, format="mp3")
+            
+            print("[Miles is speaking a response...]")
             play(audio)
 
         except Exception as e:
@@ -1126,6 +1142,8 @@ def main():
     pa = pyaudio.PyAudio()
 
     owwModel = initialize_wake_word_model()
+    
+    orca = pvorca.create(access_key=picovoice_access_key)
     
     # Function to open the stream
     def open_stream():

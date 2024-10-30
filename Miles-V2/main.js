@@ -227,6 +227,7 @@ spotify_client_id="${apiKeys['dynamic-textbox-spotify-id'] || 'empty'}"
 spotify_client_secret="${apiKeys['dynamic-textbox-spotify-secret'] || 'empty'}"
 HomeAssistant_URL_IP="${apiKeys['dynamic-textbox-home-assistant-url'] || 'empty'}"
 HomeAssistant_Token="${apiKeys['dynamic-textbox-home-assistant-token'] || 'empty'}"
+picovoice_access_key="${apiKeys["dynamic-textbox-picovoice"] || "empty"}"
 `;
 
     fs.writeFileSync(path.join(__dirname, 'apikey.py'), apiKeyContent);
