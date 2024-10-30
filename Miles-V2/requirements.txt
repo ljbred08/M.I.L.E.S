@@ -17,3 +17,4 @@ spotipy==2.23.0
 sympy==1.12
 urllib3==2.2.1
 TensorFlow
+pvorca
