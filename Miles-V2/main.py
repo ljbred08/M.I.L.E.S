@@ -1,25 +1,84 @@
-from cgi import print_directory
-from http.client import responses
-from mailbox import Message
-import requests
-import json
-from HomeAssistantUtils import home_assistant
+# AI Imports
 import openai
-import json
+import pvorca
+from openai import OpenAI
+from pydub import AudioSegment
+from pydub.playback import play
+from gtts import gTTS
+import pyaudio
+import numpy as np
+from openwakeword.model import Model
+import speech_recognition as sr
+import whisper
+
+
+# Spotify Imports
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+
+# Weather Imports
+from apikey import weather_api_key, DEFAULT_LOCATION, UNIT, api_key, picovoice_access_key
+ 
+# Utility Imports
 import math
 import os
-from apikey import weather_api_key, DEFAULT_LOCATION, UNIT, spotify_client_id, spotify_client_secret, picovoice_access_key
+import webbrowser
+import requests
+import json
+import time
+import base64
+import io
+import platform
+import subprocess
+import threading
 from datetime import datetime
-import sympy as smpy
 from urllib3.exceptions import NotOpenSSLWarning
+from bs4 import BeautifulSoup
+from HomeAssistantUtils import home_assistant
 import generateTool
-import pvorca
+from PIL import Image
+import imageio
+from http.client import responses
+from mailbox import Message
+import sympy as smpy
+import pyaudio
+import sounddevice as sd
+from scipy.signal import resample
 
-openai_base_url = "https://api.groq.com/openai/v1"
 
+
+openai_base_url = "https://api.groq.com/openai/v1"  
+current_model = "llama3-groq-70b-8192-tool-use-preview" # default model to start the program with, you can change this.
+client = OpenAI(api_key=api_key, base_url=openai_base_url)
+
+orca = pvorca.create(access_key=picovoice_access_key)
+sd_device=35
+current_audio_thread = None
+
+
+recognizer = sr.Recognizer()
+
+
+#sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=spotify_client_id,
+                                               #client_secret=spotify_client_secret,
+                                               #redirect_uri="http://localhost:8080/callback",
+                                               #scope = "user-library-read user-modify-playback-state user-read-playback-state user-read-currently-playing user-read-playback-position user-read-private user-read-email"))
 was_spotify_playing = False
 original_volume = None
 user_requested_pause = False
+
+date = datetime.now()
+
+import warnings
+
+# Suppress the specific FP16 warning
+warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+
+# Suppress the specific NotOpenSSLWarning
+warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
+
+# Suppress the specific FutureWarning from torch.load
+warnings.filterwarnings("ignore", category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
 def get_current_weather(location=None, unit=UNIT):
     print(" ")
@@ -185,17 +244,6 @@ def get_current_datetime(mode="date & time"):
     # Return the datetime response as a JSON string
     return json.dumps({"Datetime Response": datetime_response})
 
-from openai import OpenAI
-from apikey import api_key
-
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
-
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=spotify_client_id,
-                                               client_secret=spotify_client_secret,
-                                               redirect_uri="http://localhost:8080/callback",
-                                               scope = "user-library-read user-modify-playback-state user-read-playback-state user-read-currently-playing user-read-playback-position user-read-private user-read-email"))
-
 def search_and_play_song(song_name: str):
     print(f"[Miles is searching for '{song_name}' on Spotify...]")
     results = sp.search(q=song_name, limit=1)
@@ -218,8 +266,6 @@ def search_and_play_song(song_name: str):
         }, indent=4)
 
     return response
-    
-current_model = "llama-3.1-70b-versatile" # default model to start the program with, you can change this.
 
 def toggle_spotify_playback(action):
     global was_spotify_playing, user_requested_pause
@@ -303,7 +349,6 @@ def set_spotify_volume(volume_percent):
     except Exception as e:
         return json.dumps({"Spotify Volume Error Message": str(e)})
 
-
 def set_system_volume(volume_level):
     print(f"[Miles is setting system volume to {volume_level}%...]")
     try:
@@ -311,15 +356,6 @@ def set_system_volume(volume_level):
         return json.dumps({"System Volume Success Message": f"System volume set to {volume_level}"})
     except Exception as e:
         return json.dumps({"System Volume Error Message": str(e)})
-    
-import requests
-from bs4 import BeautifulSoup
-import json
-import webbrowser
-
-import requests
-from bs4 import BeautifulSoup
-import json
 
 def fetch_main_content(url):
     print(f"[Miles is browsing {url} for more info...]")
@@ -433,11 +469,7 @@ def search_google_and_return_json_with_content(searchquery):
     except Exception as e:
         return json.dumps({"error": f"An error occurred during search: {str(e)}"}, indent=4)
 
-date = datetime.now()
 
-import speech_recognition as sr
-from gtts import gTTS
-import os
 
 system_prompt = f"""
 I'm Miles, a voice assistant, inspired by Jarvis from Iron Man. My role is to assist the user using my tools when possible, I make sure to only respond in 1-2 small sentences unless asked otherwise.
@@ -481,6 +513,39 @@ Tool Usage Guidelines:
 - **Music Playback**: Search and play songs, control Spotify playback, and set volume as requested.
 - **System Volume**: Adjust the speaking volume and the system volume based on user commands.
 - **Date and Time**: Provide the current date and/or time upon request.
+"""
+short_system_prompt = f"""
+I'm Miles, a voice assistant, inspired by Jarvis from Iron Man. My role is to assist the user using my tools when possible, I make sure to only respond in 1-2 small sentences unless asked otherwise.
+You are chatting with the user via Voice Conversation. Focus on giving exact and concise facts or details from given sources, rather than explanations. Don't try to tell the user they can ask more questions, they already know that.
+Miles stands for Machine Intelligent Language Enabled System.
+
+Guideline Rules:
+
+IMPORTANT: Ending sentences with a question mark allows the user to respond without saying the wake word, "Miles." Use this rarely to avoid unintended activation. This means NEVER say "How can I assist you?", "How can I assist you today?" or any other variation. You may ask follow up questions ONLY if you tell the user about this feature first at least once.
+
+1. Use natural, simple language with minimal conversational fillers.
+2. Use built-in knowledge first, then Google search without asking.
+3. Speak weather in plain English (e.g. "78 degrees Fahrenheit").
+4. Use tools effectively, prioritizing internal knowledge.
+5. Only use webcam with explicit user permission.
+6. Display numbers in LaTeX format.
+7. Avoid ending with questions unless necessary for wake-word-free responses.
+8. Use British text-to-speech voice.
+9. Never provide links or suggest website visits.
+10. Never reference Jarvis inspiration.
+
+Tool Usage Guidelines:
+
+- **Google Search**: Summarize web results without linking to sources. Search automatically when needed.
+- **Weather**: Current conditions only. Cannot predict future weather without searching.
+- **Calculator**: Process mathematical expressions with numbers, variables and symbols.
+- **Personal Memory**: Store and retrieve memory data automatically.
+- **Webcam Scan**: Requires explicit permission. Can identify objects, text, brands, prices, colors.
+- **Switch AI Model**: Change between OpenAI models as needed.
+- **Change Personality**: Adjust response style with different prompts.
+- **Music Playback**: Control Spotify playback and music functions.
+- **System Volume**: Adjust speaking and system volume levels.
+- **Date and Time**: Provide current date/time information.
 """
 def change_personality(prompt_type, custom_prompt=None):
     global system_prompt
@@ -549,21 +614,7 @@ Tool Usage Guidelines:
     
 conversation = [{"role": "system", "content": system_prompt}]
 
-import io
-from openai import OpenAI
-from pydub import AudioSegment
-from pydub.playback import play
-from apikey import api_key
 
-
-import requests
-from openai import OpenAI
-
-import time
-import base64
-from PIL import Image
-import io
-import imageio
 
 def capture_and_encode_image():
     print("[Miles is viewing the webcam...]")
@@ -624,8 +675,9 @@ def view_webcam(focus, detail_mode='normal'):
         speak_no_text("Alright, I'm now processing the image with normal detail.")
     
     openai.api_key = api_key
-    openai.api_base = openai_base_url
     client = OpenAI(api_key=api_key)
+    client.api_base = openai_base_url
+
     
     # Setup the API request with the base64 image
     response = client.chat.completions.create(
@@ -652,39 +704,59 @@ def view_webcam(focus, detail_mode='normal'):
     # Return the serialized JSON string
     return json.dumps({"Webcam Response Message": message_text})
 
-current_audio_thread = None
+# Assuming pcm is a numpy array of PCM data
+def play_pcm_data(pcm, original_sample_rate=22050, target_sample_rate=44100):
+    print("[Miles is processing PCM data...]")
+    
+    # Resample PCM data if the original sample rate differs from the target sample rate
+    # if original_sample_rate != target_sample_rate:
+    #     num_samples = int(len(pcm) * target_sample_rate / original_sample_rate)
+    #     pcm = resample(pcm, num_samples)
+    #     print("Resampled PCM data:", pcm[:10])  # Print first 10 samples after resampling
 
-recognizer = sr.Recognizer()
+    # Convert PCM data to float32 for normalization
+    pcm_normalized = np.array(pcm, dtype=np.float32)
+    max_val = np.max(np.abs(pcm_normalized))
+    print(f"Maximum absolute value: {max_val}")
 
+    if max_val > 0:
+        pcm_normalized /= max_val  # Scale to -1 to 1 range
+        print("PCM data normalized to [-1, 1] range")
+    else:
+        print("Max value is zero, normalization skipped")
 
-openai.api_key = api_key
-openai.api_base = openai_base_url
-client = OpenAI(api_key=api_key)
+    print("Normalized PCM data:", pcm_normalized[:10])  # Print first 10 samples after normalization
+    sd.play(pcm_normalized, samplerate=original_sample_rate, device=sd_device)
+    sd.wait()  # Wait until the sound has finished playing
 
 def speak(text):
     print("[Miles is generating speech...]")
+    print(f"Input text length: {len(text) if text else 0} characters")
     if not text:
         print("No text provided to speak.")
         return
 
     try:
+        print("Attempting to synthesize speech with Orca...")
         pcm, alignments = orca.synthesize(text=text)
-        audio = AudioSegment(
-            pcm.tobytes(), 
-            frame_rate=24000,
-            sample_width=2, 
-            channels=1
-        )
+        print(f"PCM data generated - Length: {len(pcm) if pcm is not None else 'None'}")
+        print(f"Alignments received: {len(alignments) if alignments else 0}")
+        for token in alignments:
+            print(f"word=\"{token.word}\", start_sec={token.start_sec:.2f}, end_sec={token.end_sec:.2f}")
+            for phoneme in token.phonemes:
+                print(f"\tphoneme=\"{phoneme.phoneme}\", start_sec={phoneme.start_sec:.2f}, end_sec={phoneme.end_sec:.2f}")
         
-        print("[Miles is speaking a response...]")
-        play(audio)
-
+        if pcm is not None:
+            print(f"PCM data stats - Min: {np.array(pcm).min()}, Max: {np.array(pcm).max()}, Mean: {np.array(pcm).mean()}")
+            play_pcm_data(pcm)
+            print("Speech playback completed successfully")
+        else:
+            print("PCM data is None")
+            raise ValueError("PCM data is empty. Synthesis might have failed.")
+        
     except Exception as e:
-        print(f"An error occurred: {e}")
-
-        openai.api_key = api_key
-openai.api_base = openai_base_url
-client = OpenAI(api_key=api_key)
+        print(f"An error occurred during audio playback: {e}")
+        print(f"Error type: {type(e).__name__}")
 
 def speak_no_text(text):
     if not text:
@@ -694,15 +766,11 @@ def speak_no_text(text):
     def _speak():
         try:
             pcm, alignments = orca.synthesize(text=text)
-            audio = AudioSegment(
-                pcm.tobytes(), 
-                frame_rate=24000,
-                sample_width=2, 
-                channels=1
-            )
-            
+            if pcm:
+                play_pcm_data(pcm)
+            else:
+                raise ValueError("PCM data is empty. Synthesis might have failed.")
             print("[Miles is speaking a response...]")
-            play(audio)
 
         except Exception as e:
             print(f"An error occurred: {e}")
@@ -712,9 +780,6 @@ def speak_no_text(text):
     thread.start()
         
         
-        
-import speech_recognition as sr
-import whisper
 
 def listen():
     r = sr.Recognizer()
@@ -734,14 +799,6 @@ def listen():
     # Transcribe the audio file
     result = model.transcribe(audio_file)
     return result["text"]
-
-import warnings
-
-# Suppress the specific FP16 warning
-warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
-
-# Suppress the specific NotOpenSSLWarning
-warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
 
 
 def display_timeout_message():
@@ -810,6 +867,10 @@ def ask(question):
     elif not conversation_history:
         conversation_history.append({"role": "system", "content": system_prompt})
 
+    # Truncate conversation history to the last 10 messages to avoid exceeding context length
+    if len(conversation_history) > 10:
+        conversation_history = conversation_history[-10:]
+
     # Check if it's the first user message and prepend a custom message
     if len(conversation_history) == 1 and conversation_history[0]['role'] == 'system':
         custom_message = """Greet yourself and state what you can do before answering my question, add this at the end of the greeting: "Also, if I ask a follow up question, you don't need to say "Miles", you can just speak." Now answer the following question, do not restate it, do not end it with a question mark: """
@@ -824,7 +885,6 @@ def ask(question):
     timeout_timer = threading.Timer(7.0, lambda: print("Request timeout."))
     timeout_timer.start()
 
-
     tools = load_json('tools.json')
     tools = append_tools(tools, 'plugin_tool_list.json')
 
@@ -836,7 +896,7 @@ def ask(question):
 
     response_message = None
     try:
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model=current_model,
             messages=messages,
             tools=tools,
@@ -878,7 +938,7 @@ def ask(question):
 
         # Make a final API call after processing tool calls
         try:
-            final_response = openai.chat.completions.create(
+            final_response = client.chat.completions.create(
                 model=current_model,
                 messages=messages,
             )
@@ -948,9 +1008,6 @@ def initialize_and_extend_available_functions():
 
     return available_functions
 
-import os
-import pyaudio
-
 def get_device_index(pa, preferred_device_name=None):
     """
     Attempt to find an audio device index by name, or return the default
@@ -1005,8 +1062,6 @@ def open_audio_stream(pa, preferred_device_name=None):
 
     return stream
 
-import threading
-
 def pause_spotify_playback():
     try:
         sp.pause_playback()
@@ -1055,8 +1110,7 @@ def control_spotify_playback():
         if original_volume is not None:
             set_spotify_volume(int(original_volume * 0.60))
     except Exception as e:
-        print("Error controlling Spotify playback:", e)
-        
+        print("Error controlling Spotify playback:", e)       
         
 def is_spotify_playing():
     """
@@ -1072,14 +1126,7 @@ def is_spotify_playing():
         print("Failed to get Spotify playback state:", e)
         return None
     
-import os
-import platform
-import pyaudio
-import numpy as np
-from openwakeword.model import Model
-import subprocess
-import threading
-import speech_recognition as sr
+
 
 if platform.system() == 'Windows':
     MODEL_PATH = "Miles/miles-50k.onnx"
@@ -1143,7 +1190,6 @@ def main():
 
     owwModel = initialize_wake_word_model()
     
-    orca = pvorca.create(access_key=picovoice_access_key)
     
     # Function to open the stream
     def open_stream():
