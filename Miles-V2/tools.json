@@ -109,12 +109,12 @@
                 "properties": {
                     "focus": {
                         "type": "string",
-                        "description": "The primary subject or object to focus on when scanning the webcam image. Be sure to be extremely specific, but it doesn't have to be specific, like this: 'what brand is the VR headset in the image', or 'what color are the eyes in the image', or 'what is the user holding', or 'thing in image'."
+                        "description": "The task to focus on when scanning the webcam image. Be sure to be specific, like this: 'what brand is the VR headset in the image', or 'what color are the eyes in the image', or 'what is the user holding', or 'what type of plant is in the image'."
                     },
                     "detail_mode": {
                         "type": "string",
                         "enum": ["quick", "normal", "extreme"],
-                        "description": "The level of detail to return in the image description. 'quick' provides a 1-10 word concise answer, 'normal' provides a concise paragraph overview, while 'extreme' offers a comprehensive analysis in several paragraphs."
+                        "description": "The level of detail to return in the image description. 'quick' provides a 1-10 word concise answer, 'normal' provides a concise paragraph overview, while 'extreme' offers a comprehensive analysis in several paragraphs. Only use extreme if you need a wide range of details; often, using a more specific focus will provide enough detail."
                     }
                 },
                 "required": ["focus", "detail_mode"]

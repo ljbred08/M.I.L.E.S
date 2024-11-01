@@ -485,7 +485,7 @@ def search_google_and_return_json_with_content(searchquery):
 system_prompt = f"""
 I'm Miles, a voice assistant, inspired by Jarvis from Iron Man. My role is to assist the user using my tools when possible, I make sure to only respond in 1-2 small sentences unless asked otherwise.
 
-You are chatting with the user via Voice Conversation. Focus on giving exact and concise facts or details from given sources, rather than explanations. Don't try to tell the user they can ask more questions, they already know that.
+You are chatting with the user via Voice Conversation. Focus on giving exact and concise facts or details from given sources, rather than explanations. For instance, if the user asks "What's the weather?", don't give all the weather details, just say, for example, "The temperature is 50 degrees Fahrenheit; It is partly cloudy with a 90 percent chance of rain." Don't try to tell the user they can ask more questions, they already know that.
 
 Knowledge Cutoff: January, 2022.
 Current date: {date}
@@ -629,41 +629,38 @@ conversation = [{"role": "system", "content": system_prompt}]
 
 def capture_and_encode_image():
     print("[Miles is viewing the webcam...]")
-    # Initialize the webcam
+    cap = None
     try:
+        # Initialize the webcam
         cap = imageio.get_reader('<video0>')
-    except Exception as e:
-        print("[Miles failed to open webcam, check permissions...]")
-        print(e)
-        return
-    
-    # Wait for 1 second to let camera light adjust
-    time.sleep(1)
+        time.sleep(1)  # Wait for 1 second to let camera light adjust
 
-    # Capture an image
-    try:
+        # Capture an image
         frame = cap.get_next_data()
+
+        # Convert the image to PIL format then to a byte buffer
+        img = Image.fromarray(frame)
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG')
+
+        # Encode the byte buffer to base64
+        base64_image = base64.b64encode(buf.getvalue()).decode('utf-8')
+        return base64_image
+
     except Exception as e:
-        print("[Miles is Failed to capture image...]")
+        print("[Miles failed to capture image or open webcam, check permissions...]")
         print(e)
         return None
+
     finally:
-        cap.close()
-
-    # Convert the image to PIL format then to a byte buffer
-    img = Image.fromarray(frame)
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG')
-
-    # Encode the byte buffer to base64
-    base64_image = base64.b64encode(buf.getvalue()).decode('utf-8')
-
-    return base64_image
+        if cap is not None:
+            cap.close()
 
 
 def view_webcam(focus, detail_mode='normal'):
     print("[Miles is describing the image...]")
-    speak("Hold on while I view your webcam.", use_threading=True)
+    print(f"Focus: {focus}")
+    speak("Hold on while I view your webcam.", blocking=False)
     # Capture and encode image from webcam
     base64_image = capture_and_encode_image()
     if base64_image is None:
@@ -673,24 +670,23 @@ def view_webcam(focus, detail_mode='normal'):
     if detail_mode == 'extreme':
         prompt = f"What’s in this image, especially focusing on the prompt '{focus}'? Describe it with as much detail as physically possible. Include product names and models if applicable from the image. For example, if the image shows a red Nike Air Jordan shoe, write a long description specifically stating the brand, model of the shoe, who made the shoe, and any other details physically possible to get from the image including time of day, art style, etc. Just be EXTREMELY specific, unless the prompt '{focus}' in the image is so recognizable that it does not need a detailed description. But DO explain in great detail if there is something different about it, e.g., a sign on the Burj skyscraper, any text in the image, any symbols in the image, any custom painted shoe."
         max_tokens=1000
-        speak("Alright, I'm now processing the image with extreme detail.", use_threading=True)
+        speak("Processing image with extreme detail", blocking=False)
     elif detail_mode == 'quick':
         prompt = f"As concise as possible, 1-10 words, what's essential or notable in this image regarding the prompt: '{focus}'?"
         max_tokens=50
-        speak("Alright, I'm now processing the image with quick detail.", use_threading=True)
+        speak("Processing image with quick detail", blocking=False)
         time.sleep(0.5)
-        
     else:  # Normal detail mode
         prompt = f"Please describe what’s in this image with a focus on the prompt '{focus}'. Provide a clear and concise description, including notable objects, colors, and any visible text or symbols. Highlight any specific details relevant to the prompt '{focus}' without delving into extreme specifics."
         max_tokens=300
-        speak("Alright, I'm now processing the image with normal detail.", use_threading=True)
+        speak("Processing image with normal detail", blocking=False)
     
     client = OpenAI(api_key=api_key, base_url=openai_base_url)
 
     
     # Setup the API request with the base64 image
     response = client.chat.completions.create(
-        model="llama-3.2-11b-vision-preview",
+        model="llama-3.2-90b-vision-preview",
         messages=[
             {
                 "role": "user",
@@ -705,7 +701,7 @@ def view_webcam(focus, detail_mode='normal'):
                 ],
             }
         ],
-        max_tokens=max_tokens,
+        #max_tokens=max_tokens,
     )
     
     # Print the response from OpenAI
@@ -718,7 +714,7 @@ def view_webcam(focus, detail_mode='normal'):
     return json.dumps({"Webcam Response Message": message_text})
 
 # Assuming pcm is a numpy array of PCM data
-def play_pcm_data(pcm, original_sample_rate=22050, target_sample_rate=44100):
+def play_pcm_data(pcm, original_sample_rate=22050, target_sample_rate=44100, blocking=True):
     print("[Miles is processing PCM data...]")
     
     # Resample PCM data if the original sample rate differs from the target sample rate
@@ -740,44 +736,40 @@ def play_pcm_data(pcm, original_sample_rate=22050, target_sample_rate=44100):
 
     print("Normalized PCM data:", pcm_normalized[:10])  # Print first 10 samples after normalization
     sd.play(pcm_normalized, samplerate=original_sample_rate, device=sd_device)
-    sd.wait()  # Wait until the sound has finished playing
+    if blocking:
+        sd.wait()  # Wait until the sound has finished playing
 
-def speak(text, use_threading=False):
+def speak(text, blocking=True): # Note: blocking=False does not currently work.
     if not text:
         print("No text provided to speak.")
         return
 
-    def _speak():
-        print("[Miles is generating speech...]")
-        print(f"Input text length: {len(text)} characters")
-        try:
-            print("Attempting to synthesize speech with Orca...")
-            pcm, alignments = orca.synthesize(text=text, speech_rate=1.2)
-            orca.delete()
-            print(f"PCM data generated - Length: {len(pcm) if pcm is not None else 'None'}")
-            print(f"Alignments received: {len(alignments) if alignments else 0}")
-            for token in alignments:
-                print(f"word=\"{token.word}\", start_sec={token.start_sec:.2f}, end_sec={token.end_sec:.2f}")
-                for phoneme in token.phonemes:
-                    print(f"\tphoneme=\"{phoneme.phoneme}\", start_sec={phoneme.start_sec:.2f}, end_sec={phoneme.end_sec:.2f}")
+    
+    print("[Miles is generating speech...]")
+    print(f"Input text length: {len(text)} characters")
+    try:
+        print("Attempting to synthesize speech with Orca...")
+        pcm, alignments = orca.synthesize(text=text, speech_rate=1.2)
+        print(f"PCM data generated - Length: {len(pcm) if pcm is not None else 'None'}")
+        print(f"Alignments received: {len(alignments) if alignments else 0}")
+        # for token in alignments:
+        #     print(f"word=\"{token.word}\", start_sec={token.start_sec:.2f}, end_sec={token.end_sec:.2f}")
+        #     for phoneme in token.phonemes:
+        #         print(f"\tphoneme=\"{phoneme.phoneme}\", start_sec={phoneme.start_sec:.2f}, end_sec={phoneme.end_sec:.2f}")
 
-            if pcm is not None:
-                print(f"PCM data stats - Min: {np.array(pcm).min()}, Max: {np.array(pcm).max()}, Mean: {np.array(pcm).mean()}")
-                play_pcm_data(pcm)
-                print("Speech playback completed successfully")
-            else:
-                print("PCM data is None")
-                raise ValueError("PCM data is empty. Synthesis might have failed.")
+        if pcm is not None:
+            print(f"PCM data stats - Min: {np.array(pcm).min()}, Max: {np.array(pcm).max()}, Mean: {np.array(pcm).mean()}")
+            play_pcm_data(pcm, original_sample_rate=orca.sample_rate,blocking=blocking)
+            print("Speech playback completed successfully")
+        else:
+            print("PCM data is None")
+            raise ValueError("PCM data is empty. Synthesis might have failed.")
 
-        except Exception as e:
-            print(f"An error occurred during audio playback: {e}")
-            print(f"Error type: {type(e).__name__}")
+    except Exception as e:
+        print(f"An error occurred during audio playback: {e}")
+        print(f"Error type: {type(e).__name__}")
 
-    if use_threading:
-        thread = threading.Thread(target=_speak)
-        thread.start()
-    else:
-        _speak()
+    
 
         
         
@@ -1297,6 +1289,7 @@ def main():
             audio_stream.stop_stream()
             audio_stream.close()
         pa.terminate()
-
+        orca.delete()
+        
 if __name__ == '__main__':
     main()
