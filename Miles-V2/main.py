@@ -1,5 +1,4 @@
 # AI Imports
-import openai
 import pvorca
 from openai import OpenAI
 from pydub import AudioSegment
@@ -9,7 +8,7 @@ import pyaudio
 import numpy as np
 from openwakeword.model import Model
 import speech_recognition as sr
-import whisper
+from faster_whisper import WhisperModel
 
 
 # Spotify Imports
@@ -85,11 +84,11 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="You are using
 # Initialize Silero VAD model once
 vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                                 model='silero_vad',
-                                force_reload=True)
+                                force_reload=False)
 get_speech_timestamps = utils[0]
 
-# Load the smallest Whisper model for fast speech recognition
-whisper_model = whisper.load_model("tiny")
+# Load the smallest Faster Whisper model for fast speech recognition
+whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
 def get_current_weather(location=None, unit=UNIT):
     print(" ")
@@ -828,9 +827,10 @@ def listen():
     audio_file = "captured_audio.wav"
     sf.write(audio_file, audio_data, 16000)
     
-    # Transcribe the audio using Whisper model
-    result = whisper_model.transcribe(audio_file)
-    return result["text"]
+    # Transcribe the audio using Faster Whisper model
+    segments, info = whisper_model.transcribe(audio_file, beam_size=5)
+    transcription = " ".join([segment.text for segment in segments])
+    return transcription
 
 
 def display_timeout_message():
