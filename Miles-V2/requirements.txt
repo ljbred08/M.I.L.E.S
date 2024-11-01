@@ -19,3 +19,4 @@ urllib3==2.2.1
 TensorFlow
 pvorca
 soundfile
+faster-whisper
