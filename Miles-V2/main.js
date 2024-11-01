@@ -101,12 +101,13 @@ function startServerAndBackend() {
 
             python.stderr.on('data', (data) => {
                 const errorMessage = data.toString();
-                // Filter out the specific downloading message
-                if (!errorMessage.includes("Downloading")) {
+                // Filter out downloading and VAD messages
+                const keywords = ["downloading", "vad", "silero"];
+                if (keywords.some(keyword => errorMessage.toLowerCase().includes(keyword)) ) {
+                    io.emit('pythonOutput', errorMessage);
+                } else {
                     console.error("Python Error:", errorMessage);
                     io.emit('pythonError', errorMessage);
-                } else {
-                    console.log("Downloading message:", errorMessage);
                 }
             });
 
