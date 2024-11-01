@@ -264,9 +264,9 @@ function initializeButtonAndTextbox(buttonId, textboxId, defaultText, tooltipTex
         
         // Custom validation logic
         if (buttonId.includes('openai')) {
-            isValid = originalText.startsWith('sk-');
-        //} else if (buttonId.includes('picovoice')) {
-            //isValid = originalText.endsWith('==');
+            isValid = originalText.startsWith('sk-') || originalText.startsWith('gsk-');
+        } else if (buttonId.includes('picovoice')) {
+            isValid = originalText.endsWith('==');
         } else if (buttonId.includes('unit')) {
             let lowerCaseText = originalText.toLowerCase();
             isValid = lowerCaseText === 'metric' || lowerCaseText === 'imperial';
@@ -316,13 +316,13 @@ function initializeButtonAndTextbox(buttonId, textboxId, defaultText, tooltipTex
 // Initialize all buttons and textboxes with their respective IDs and messages
 // This makes the dynamic part of the buttons and textboxes actually work
 initializeButtonAndTextbox('dynamic-button-openai', 'dynamic-textbox-openai', 'Enter your OpenAI API key', 'Hmm... it seems like this isn\'t an OpenAI API key.');
+initializeButtonAndTextbox('dynamic-button-picovoice', 'dynamic-textbox-picovoice', 'Enter your Picovoice Access Key', 'Hmm... it seems like this isn\'t a Picovoice Access Key.');
 initializeButtonAndTextbox('dynamic-button-spotify-id', 'dynamic-textbox-spotify-id', 'Enter your Spotify Client ID', 'Hmm... it seems like this isn\'t a Spotify Client ID.');
 initializeButtonAndTextbox('dynamic-button-spotify-secret', 'dynamic-textbox-spotify-secret', 'Enter your Spotify Client Secret', 'Hmm... it seems like this isn\'t a Spotify Client Secret.');
 initializeButtonAndTextbox('dynamic-button-city', 'dynamic-textbox-city', 'Enter your Preferred City', 'Please enter a valid city name (Capitalized).');
 initializeButtonAndTextbox('dynamic-button-unit', 'dynamic-textbox-unit', 'Enter your Default Unit (Metric or Imperial)', 'Please enter \'Imperial\' for Fahrenheit or \'Metric\' for Celsius.');
 initializeButtonAndTextbox('dynamic-button-home-assistant-url', 'dynamic-textbox-home-assistant-url', 'Enter your Home Assistant URL or IP', 'Enter your Home Assistant URL or IP');
 initializeButtonAndTextbox('dynamic-button-home-assistant-token', 'dynamic-textbox-home-assistant-token', 'Enter your Long Lived Access Token', 'Enter your Long Lived Access Token');
-
 
 
 
