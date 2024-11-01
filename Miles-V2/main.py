@@ -53,7 +53,7 @@ openai_base_url = "https://api.groq.com/openai/v1"
 current_model = "llama3-groq-70b-8192-tool-use-preview" # default model to start the program with, you can change this.
 client = OpenAI(api_key=api_key, base_url=openai_base_url)
 
-orca = pvorca.create(access_key=picovoice_access_key)
+orca = pvorca.create(access_key=picovoice_access_key, model_path="orca_params_male.pv")
 sd_device=35
 current_audio_thread = None
 
