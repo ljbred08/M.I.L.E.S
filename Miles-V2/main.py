@@ -809,6 +809,7 @@ def listen():
     audio_chunks = []
     silence_duration = 0
     SILENCE_THRESHOLD = 1.0  # seconds of silence to stop recording
+    speaking_detected = False  # Flag to indicate if speaking has started
     
     try:
         while True:
@@ -823,8 +824,12 @@ def listen():
             # Get speech timestamps using global model
             speech_timestamps = get_speech_timestamps(tensor_audio, vad_model, sampling_rate=16000)
             
-            # If no speech detected, increment silence counter
-            if not speech_timestamps:
+            # If speech is detected, set the flag
+            if speech_timestamps:
+                speaking_detected = True
+            
+            # If no speech detected and speaking has started, increment silence counter
+            if not speech_timestamps and speaking_detected:
                 silence_duration += (512 / 16000)  # chunk duration in seconds
                 if silence_duration > SILENCE_THRESHOLD:
                     break
