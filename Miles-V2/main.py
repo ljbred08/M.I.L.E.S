@@ -44,6 +44,8 @@ import sympy as smpy
 import pyaudio
 import sounddevice as sd
 from scipy.signal import resample
+import torch
+import soundfile as sf
 
 
 
@@ -79,6 +81,15 @@ warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
 
 # Suppress the specific FutureWarning from torch.load
 warnings.filterwarnings("ignore", category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
+
+# Initialize Silero VAD model once
+vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                model='silero_vad',
+                                force_reload=True)
+get_speech_timestamps = utils[0]
+
+# Load the smallest Whisper model for fast speech recognition
+whisper_model = whisper.load_model("tiny")
 
 def get_current_weather(location=None, unit=UNIT):
     print(" ")
@@ -782,22 +793,56 @@ def speak_no_text(text):
         
 
 def listen():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        r.adjust_for_ambient_noise(source, duration=0.1)
-        print("Listening for prompt... Speak now.")
-        audio = r.listen(source)  # Listen until silence is detected
-
-    # Save the captured audio to a WAV file
+    # Initialize PyAudio
+    p = pyaudio.PyAudio()
+    
+    # Open stream with parameters that Silero VAD expects
+    stream = p.open(format=pyaudio.paFloat32,
+                   channels=1,
+                   rate=16000,
+                   input=True,
+                   frames_per_buffer=512)
+    
+    print("Listening for prompt... Speak now.")
+    
+    # Record audio chunks until silence is detected
+    audio_chunks = []
+    silence_duration = 0
+    SILENCE_THRESHOLD = 1.0  # seconds of silence to stop recording
+    
+    try:
+        while True:
+            # Read audio chunk
+            chunk = np.frombuffer(stream.read(512), dtype=np.float32)
+            audio_chunks.append(chunk)
+            
+            # Convert recent chunks to tensor for VAD
+            recent_audio = np.concatenate(audio_chunks[-32:])  # analyze last ~1 second
+            tensor_audio = torch.FloatTensor(recent_audio)
+            
+            # Get speech timestamps using global model
+            speech_timestamps = get_speech_timestamps(tensor_audio, vad_model, sampling_rate=16000)
+            
+            # If no speech detected, increment silence counter
+            if not speech_timestamps:
+                silence_duration += (512 / 16000)  # chunk duration in seconds
+                if silence_duration > SILENCE_THRESHOLD:
+                    break
+            else:
+                silence_duration = 0
+                
+    finally:
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+    
+    # Combine all chunks and save to WAV file
+    audio_data = np.concatenate(audio_chunks)
     audio_file = "captured_audio.wav"
-    with open(audio_file, "wb") as f:
-        f.write(audio.get_wav_data())
-
-    # Load the Whisper model
-    model = whisper.load_model("tiny")  # Adjust the model size as needed
-
-    # Transcribe the audio file
-    result = model.transcribe(audio_file)
+    sf.write(audio_file, audio_data, 16000)
+    
+    # Transcribe the audio using Whisper model
+    result = whisper_model.transcribe(audio_file)
     return result["text"]
 
 
