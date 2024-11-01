@@ -100,8 +100,14 @@ function startServerAndBackend() {
             });
 
             python.stderr.on('data', (data) => {
-                console.error("Python Error:", data.toString());
-                io.emit('pythonError', data.toString());
+                const errorMessage = data.toString();
+                // Filter out the specific downloading message
+                if (!errorMessage.includes("Downloading")) {
+                    console.error("Python Error:", errorMessage);
+                    io.emit('pythonError', errorMessage);
+                } else {
+                    console.log("Downloading message:", errorMessage);
+                }
             });
 
             python.on('close', (code) => {
