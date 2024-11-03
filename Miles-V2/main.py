@@ -902,7 +902,7 @@ def append_tools(tools, plugin_file_path):
     return tools + plugin_tools  # Return the combined list
 
 
-def ask(question, summarize_model="llama-3.1-8b-instruct"):
+def ask(question, summarize_model="llama-3.1-8b-instant"):
     print("User:", question)
     print(" ")
     global conversation_history
