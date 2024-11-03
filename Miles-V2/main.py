@@ -87,8 +87,25 @@ vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                                 force_reload=False)
 get_speech_timestamps = utils[0]
 
-# Load the smallest Faster Whisper model for fast speech recognition
-whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+# Global flag to switch transcription method
+USE_OPENAI_WHISPER_API = True  # Set to True to use OpenAI Whisper API
+
+# Load the smallest Faster Whisper model for fast speech recognition if the flag is not set
+if not USE_OPENAI_WHISPER_API:
+    whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+
+def transcribe_audio(audio_filename):
+    if USE_OPENAI_WHISPER_API:
+        # Use OpenAI Whisper API for transcription
+        with open(audio_filename, "rb") as file:
+            transcript = client.audio.transcriptions.create(model="distil-whisper-large-v3-en", file=(audio_filename, file.read()))
+            transcription = transcript.text
+    else:
+        # Use existing Faster Whisper model for transcription
+        segments, info = whisper_model.transcribe(audio_filename, beam_size=5)
+        transcription = " ".join([segment.text for segment in segments])
+    
+    return transcription
 
 def get_current_weather(location=None, unit=UNIT):
     print(" ")
@@ -738,7 +755,7 @@ def play_pcm_data(pcm, original_sample_rate=22050, target_sample_rate=44100, blo
     if blocking:
         sd.wait()  # Wait until the sound has finished playing
 
-def speak(text, blocking=True): # Note: blocking=False does not currently work.
+def speak(text, speed=1.2, blocking=True): # Note: blocking=False does not currently work.
     if not text:
         print("No text provided to speak.")
         return
@@ -748,7 +765,7 @@ def speak(text, blocking=True): # Note: blocking=False does not currently work.
     print(f"Input text length: {len(text)} characters")
     try:
         print("Attempting to synthesize speech with Orca...")
-        pcm, alignments = orca.synthesize(text=text, speech_rate=1.2)
+        pcm, alignments = orca.synthesize(text=text, speech_rate=speed)
         print(f"PCM data generated - Length: {len(pcm) if pcm is not None else 'None'}")
         print(f"Alignments received: {len(alignments) if alignments else 0}")
         # for token in alignments:
@@ -822,14 +839,15 @@ def listen():
         stream.close()
         p.terminate()
     
+    print("Saving audio...")
     # Combine all chunks and save to WAV file
     audio_data = np.concatenate(audio_chunks)
     audio_file = "captured_audio.wav"
     sf.write(audio_file, audio_data, 16000)
     
     # Transcribe the audio using Faster Whisper model
-    segments, info = whisper_model.transcribe(audio_file, beam_size=5)
-    transcription = " ".join([segment.text for segment in segments])
+    print("Transcribing audio...")
+    transcription = transcribe_audio(audio_file)
     return transcription
 
 
@@ -884,7 +902,7 @@ def append_tools(tools, plugin_file_path):
     return tools + plugin_tools  # Return the combined list
 
 
-def ask(question):
+def ask(question, summarize_model="llama-3.1-8b-instruct"):
     print("User:", question)
     print(" ")
     global conversation_history
@@ -991,6 +1009,21 @@ def ask(question):
     save_conversation_history(conversation_history)
 
     timeout_timer_second.cancel()  # Ensure the second timer is cancelled in all paths.
+    
+    # Check if the response is longer than 2 sentences and summarize it if necessary
+    if final_response_message.count('.') > 2:
+        print("Response is longer than 2 sentences, resending to API for summarization...")
+        messages.append({"role": "user", "content": question})
+        messages.append({"role": "assistant", "content": final_response_message})
+        messages.append({"role": "user", "content": "Please summarize the last response to be less than 2 sentences unless the user specifically asked for a detailed response. You are a voice assistant, so a long response will take too long to say. Try to keep the most important details. Don't keep details that are not important or irrelevant."})
+        try:
+            summary_response = client.chat.completions.create(
+                model=summarize_model,
+                messages=messages,
+            )
+            final_response_message = summary_response.choices[0].message.content
+        finally:
+            timeout_timer_second.cancel()
     return final_response_message
 
 def reply(question):
